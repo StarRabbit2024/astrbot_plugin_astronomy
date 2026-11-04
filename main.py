@@ -1,16 +1,19 @@
 from datetime import datetime
 
-from astrbot.api import logger
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 from .moon_phase import CN, moon_phase
+from .riseset import BODIES, day_riseset, now_status, _parse_riseset_args
 
-
-@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.2")
+@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.3")
 class MyPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
+        self.config=config
+        self.lat = float(config.get("latitude", 31.94))
+        self.lon = float(config.get("longitude", 118.79))
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -36,10 +39,9 @@ class MyPlugin(Star):
         data_dict = moon_phase(time_data)
         show_time = time_data.strftime("%Y-%m-%d %H:%M")
 
-        reply=f"查询时间为{show_time}时的月相：月龄：{data_dict['age']}天，月面照明率：{data_dict['illumination']},月相：{data_dict['phase_name']}。"
+        reply=f"查询时间为{show_time}时的月相：\n月龄：{data_dict['age']}天，\n月面照明率：{data_dict['illumination']}，\n月相：{data_dict['phase_name']}。"
 
         yield event.plain_result(reply)  # 发送一条纯文本消息
-
 
     @filter.llm_tool(name="get_moon_phase_tool")
     async def get_moon_phase_tool(self, event: AstrMessageEvent, time: str | None = None):
@@ -62,6 +64,73 @@ class MyPlugin(Star):
         data_dict = moon_phase(time_data)
         show_time = time_data.strftime("%Y-%m-%d %H:%M")
         reply=f"查询时间为{show_time}时的月相：月龄：{data_dict['age']}天，月面照明率：{data_dict['illumination']},月相：{data_dict['phase_name']}。"
+
+        return reply
+
+    @filter.command("risesetday")
+    async def risesetday_cmd(self, event: AstrMessageEvent):
+        """
+        查询指定日期的天体升落情况。从消息文本解析时间（输入日期格式YYYY-MM-DD（北京时间），默认查询当日太阳），直接回复。
+        """
+        message_str = event.message_str  # 用户发的纯文本消息字符串
+        message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
+        logger.info(message_chain)
+
+        idx = message_str.find("/risesetday")
+        text = message_str[idx + len("/risesetday") :]
+
+        try:
+            day, body, pos_fn, h0 = _parse_riseset_args(text)
+        except ValueError as e:
+            yield event.plain_result(f"参数没看懂：{e}\n格式示例：/risesetday 2026-11-04 SUN")
+            return
+
+        result = day_riseset(pos_fn, self.lat, self.lon, h0, day)
+
+        reply=(f"查询日期为{result['date_local']}时天体{body}的升落情况：\n"
+            f"升起时间：{result['rise_time']}，\n"
+            f"中天时间：{result['transit_time']}，\n"
+            f"中天高度：{result['transit_high']}，\n"
+            f"落下时间: {result['set_time']}。")
+
+        yield event.plain_result(reply)  # 发送一条纯文本消息
+
+    @filter.llm_tool(name="get_riseset_day_tool")
+    async def get_riseset_day_tool(self, event: AstrMessageEvent, time: str | None = None, body: str = "SUN"):
+        """
+        查询指定日期的天体升落情况。
+        Args:time(str): 查询时间，格式 YYYY-MM-DD（北京时间）。可省略，省略表示当前日期。
+        body(str):查询天体，可省略，省略表示查询太阳（SUN）
+        """
+        message_chain = (
+            event.get_messages()
+        )  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
+        logger.info(message_chain)
+
+        if time is None:
+            day = datetime.now()
+        else:
+            try:
+                day = datetime.strptime(time, "%Y-%m-%d")
+            except ValueError:
+                return f"参数没看懂：日期格式 YYYY-MM-DD，收到的是 {time}"
+
+        body = body.upper()
+        try:
+            if body not in BODIES:
+                raise ValueError(f"暂时只支持 SUN，收到的是 {body}")
+            pos_fn, h0 = BODIES[body]
+        except ValueError as e:
+            return f"参数没看懂：{e}\n格式要求：time:YYYY-MM-DD，body:'SUN'"
+            
+
+        result = day_riseset(pos_fn, self.lat, self.lon, h0, day)
+
+        reply=(f"查询日期为{result['date_local']}时天体{body}的升落情况：\n"
+            f"升起时间：{result['rise_time']}，\n"
+            f"中天时间：{result['transit_time']}，\n"
+            f"中天高度：{result['transit_high']}，\n"
+            f"落下时间: {result['set_time']}。")
 
         return reply
 

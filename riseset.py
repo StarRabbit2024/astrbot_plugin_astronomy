@@ -1,8 +1,6 @@
 import math
 from datetime import datetime, timedelta
 
-from moon_phase import normalize
-
 SUN_H0 = -0.833
 STAR_H0 = -0.567
 
@@ -29,13 +27,9 @@ def delta_t_seconds(year_float):
 def sun_pos(t: datetime):
     """
     计算目标时间太阳在天球上的坐标。
-    输入: 一个 datetime（带时区信息最佳，不带就当CN东八区）
-    返回: {
-        "Dec": 赤纬(度),
-        "RA": 赤经(小时)
-        }
+    输入: 一个 datetime UTC
+    返回: (赤经(小时), 赤纬(度))
     """
-    t = normalize(t)
     n = d_j2000(t)
     M = (357.5291 + 0.98560028*n) % 360                                                 # 平近点角
     M_rad = math.radians(M)
@@ -48,11 +42,11 @@ def sun_pos(t: datetime):
     dec_deg = math.degrees(Dec)
     ra_hours = math.degrees(RA) / 15 % 24
     
-    return {"Dec": dec_deg, "RA": ra_hours}
+    return (ra_hours, dec_deg)
 
 def _refine(m, kind, ctx: dict):                    
     """
-    迭代确定更佳的m。同时计算中天高度角。
+    迭代确定更佳的m。
     输入:近似的m, kind: 计算类型"rise"/"set"/"transit", 参数字典ctx
     """
     for _ in range(2):                   # 固定 2 轮迭代
@@ -71,7 +65,7 @@ def _refine(m, kind, ctx: dict):
         if kind == "transit":
             m += -H / 360
         else:
-            m += (h - ctx["h0"]) / (-360*math.cos(ctx["lat_rad"])*math.cos(dec_rad)*math.sin(H_rad))
+            m += (h - ctx["h0"]) / (360*math.cos(ctx["lat_rad"])*math.cos(dec_rad)*math.sin(H_rad))
     return m
 
 def _events_on_base(base, pos_fn, lat, lon_east, h0, d_T):
@@ -86,7 +80,7 @@ def _events_on_base(base, pos_fn, lat, lon_east, h0, d_T):
     d_ra = (ra1 - ra0) % 24     # 小时/天
     d_dec = dec1 - dec0         # 度/天
 
-    m0 = ((ra0*15 - theta0 - lon) / 360) % 1
+    m0 = ((ra0*15 - theta0 + lon) / 360) % 1
 
     ctx = {"lat": lat, "lon": lon, "h0": h0, "ra0": ra0, "dec0": dec0,"d_ra": d_ra, "d_dec": d_dec, "theta0": theta0, "d_T": d_T, "lat_rad": lat_rad}
 
@@ -95,14 +89,21 @@ def _events_on_base(base, pos_fn, lat, lon_east, h0, d_T):
     cos_h0 = ((math.sin(h0_rad) - math.sin(lat_rad)*math.sin(dec0_rad))/(math.cos(lat_rad)*math.cos(dec0_rad)))
 
     if cos_h0 >= 1:                       # 拱极：永不落，只有中天
-        return [("transit_time", _refine(m0, "transit", ctx))]
+        m = _refine(m0, "transit", ctx)
+        dec_t = dec0 + d_dec*(m + d_T/86400)
+        h = 90 - abs(lat - dec_t)
+        return [("transit_time", [m, h])]
     if cos_h0 <= -1:                      # 永不升
         return []
 
     H0 = math.degrees(math.acos(cos_h0))
-    return [("rise_time",   _refine(m0 - H0/360, "rise", ctx)),
-            ("transit_time", _refine(m0, "transit", ctx)),
-            ("set_time",    _refine(m0 + H0/360, "set", ctx))]
+    m = _refine(m0, "transit", ctx)
+    dec_t = dec0 + d_dec*(m + d_T/86400)
+    h = 90 - abs(lat - dec_t)
+
+    return [("rise_time", _refine(m0 - H0/360, "rise", ctx)),
+            ("transit_time", [m, h]),
+            ("set_time", _refine(m0 + H0/360, "set", ctx))]
 
 def _collect_events(pos_fn, lat, lon_east, h0, base_list):
     """
@@ -112,8 +113,13 @@ def _collect_events(pos_fn, lat, lon_east, h0, base_list):
     for base in base_list:
         dT = delta_t_seconds(2000 + d_j2000(base)/365.25)
         for kind, m in _events_on_base(base, pos_fn, lat, lon_east, h0, dT):
-            t_utc = base + timedelta(days=m)
-            out.append((kind, t_utc + timedelta(hours=8)))
+            if kind == "transit_time":
+                t_utc = base + timedelta(days=m[0])
+                t_cn = t_utc + timedelta(hours=8)
+                out.append((kind, [t_cn, m[1]]))
+            else:
+                t_utc = base + timedelta(days=m)
+                out.append((kind, t_utc + timedelta(hours=8)))
     return out
 
 # ---------- 模式一：日历查询 ----------
@@ -137,30 +143,36 @@ def day_riseset(pos_fn, lat, lon_east, h0, date_local):
     day = date_local.replace(hour=0, minute=0, second=0, microsecond=0)
     base_z = day - timedelta(days=1)
     events = _collect_events(pos_fn, lat, lon_east, h0, [base_z, day])
-    result = {"date_local": day.date().isoformat(), "rise_time": None, "transit_time": None, "set_time": None}
+    result = {"date_local": day.date().isoformat(), "rise_time": None, "transit_time": None, "set_time": None, "transit_high": None}
     for kind, t_cn in events:
-        if t_cn.date() == day.date():
-            result[kind] = t_cn.strftime("%H:%M")
+        if kind == "transit_time":
+            result[kind] = t_cn[0].strftime("%H:%M")
+            h = t_cn[1]
+            result["transit_high"] = f"{h:.1f}°"
+        else:
+            if t_cn.date() == day.date():
+                result[kind] = t_cn.strftime("%H:%M")
     return result
 
 # ---------- 模式二：此刻状态 ----------
 
-def now_status(pos_fn, lat, lon_east, h0, t_now):
+def now_status(pos_fn, lat, lon_east, h0, t_now: datetime):
     """    
     计算目标天体在当前时刻的位置，以及未来的升落时间，默认使用北京时间。
     输入: 
         pos_fn:用于计算天体在天球上的坐标的函数,
         lat, lon_east:观测地点经纬度,
         h0:几何高度阈值，大气折射，视半径，视差的修正,
-        date_local:北京时间的日期
+        t_now:北京时间的当前时间
     输出：{
-        "date_local":北京时间的日期,
-        "rise_time":升起时间,
-        "transit_time":中天时间,
-        "transit_high":中天高度,
-        "set_time":落下时间
+        "status":天体状态,
+        "altitude":天体当前高度,
+        "next_transit_time":下一次中天时间,
+        "next_transit_high":下一次中天高度,
+        "next_set_time":下一次落下时间,
+        "next_rise_time":下一次升起时间
         }"""
-    t_ut = normalize(t_now)
+    t_ut = t_now - timedelta(hours=8)
     base0 = t_ut.replace(hour=0, minute=0, second=0, microsecond=0)
 
     ra, dec = pos_fn(t_ut)
@@ -170,27 +182,63 @@ def now_status(pos_fn, lat, lon_east, h0, t_now):
     dec_rad = math.radians(dec)
     alt = math.degrees(math.asin(math.sin(lat_rad)*math.sin(dec_rad) + math.cos(lat_rad)*math.cos(dec_rad)*math.cos(math.radians(H))))
 
-    bases = [base0 + timedelta(days=k) for k in range(-2, 3)]
-    events = _collect_events(pos_fn, lat, lon_east, h0, bases)
-    prev = {"rise": None, "set": None}
-    nxt = {"rise": None, "set": None}
-    for kind, t_cn in events:
-        if t_cn <= t_now:
-            if prev[kind] is None or t_cn > prev[kind]:
-                prev[kind] = t_cn
-        else:
-            if nxt[kind] is None or t_cn < nxt[kind]:
-                nxt[kind] = t_cn
+    if alt > h0:
+        status = "above"
+    else:
+        status = "below"
 
+    bases = [base0 + timedelta(days=k) for k in range(2)]
+    events = _collect_events(pos_fn, lat, lon_east, h0, bases)
+
+    nxt = {"rise_time": None, "transit_time": None, "set_time": None, "transit_high": None}
+    for kind, t_cn in events:
+        if kind == "transit_time":
+            if t_cn[0] > t_now:
+                if nxt[kind] is None or t_cn[0] < nxt[kind]:
+                    nxt[kind] = t_cn[0]
+                    nxt["transit_high"] = t_cn[1]
+        else:
+            if t_cn > t_now:
+                if nxt[kind] is None or t_cn < nxt[kind]:
+                    nxt[kind] = t_cn
+  
     def fmt(dt):
         return dt.strftime("%m-%d %H:%M") if dt else None
 
-    return {"altitude": f"{alt:.1f}°",
-            "status": "above" if alt > h0 else "below",
-            "next_set": fmt(prev["rise"]), "prev_set": fmt(prev["set"]),
-            "next_rise": fmt(nxt["rise"]), "next_set": fmt(nxt["set"])
-            }
+    def fmh(h):
+        return f"{h:.1f}°" if h else None
 
+    return {
+        "status": status,
+        "altitude": f"{alt:.1f}°",
+        "next_transit_time":fmt(nxt["transit_time"]),
+        "next_transit_high":fmh(nxt["transit_high"]),
+        "next_set_time":fmt(nxt["set_time"]),
+        "next_rise_time":fmt(nxt["rise_time"])
+        }
+
+# ---------- 支持统计 ----------
+BODIES = {"SUN": (sun_pos, SUN_H0)}
+
+# ---------- 命令解析 ----------
+def _parse_riseset_args(text: str):
+    """
+    '2026-11-04 SUN' → (day, pos_fn, h0)，解析失败抛 ValueError(中文提示)
+    """
+    parts = text.split()
+    day, body = None, "SUN"
+
+    for p in parts:
+        if "-" in p:                                   # 带横线的一段当日期
+            day = datetime.strptime(p, "%Y-%m-%d")     # 格式不对自动抛 ValueError
+        else:
+            body = p.upper()
+
+    if body not in BODIES:
+        raise ValueError(f"暂时只支持 SUN，收到的是 {body}")
+    if day is None:                                    # 只给天体没给日期 → 今天
+        day = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return day, body, *BODIES[body]
 
 if __name__ == "__main__":
     # sun_pos 若在本文件上方定义则直接用；在别的模块就改成 import
