@@ -183,9 +183,9 @@ def now_status(pos_fn, lat, lon_east, h0, t_now: datetime):
     alt = math.degrees(math.asin(math.sin(lat_rad)*math.sin(dec_rad) + math.cos(lat_rad)*math.cos(dec_rad)*math.cos(math.radians(H))))
 
     if alt > h0:
-        status = "above"
+        status = "地平上"
     else:
-        status = "below"
+        status = "已落下"
 
     bases = [base0 + timedelta(days=k) for k in range(2)]
     events = _collect_events(pos_fn, lat, lon_east, h0, bases)
@@ -193,14 +193,12 @@ def now_status(pos_fn, lat, lon_east, h0, t_now: datetime):
     nxt = {"rise_time": None, "transit_time": None, "set_time": None, "transit_high": None}
     for kind, t_cn in events:
         if kind == "transit_time":
-            if t_cn[0] > t_now:
-                if nxt[kind] is None or t_cn[0] < nxt[kind]:
-                    nxt[kind] = t_cn[0]
-                    nxt["transit_high"] = t_cn[1]
+            if t_cn[0] > t_now and (nxt[kind] is None or t_cn[0] < nxt[kind]):
+                nxt[kind] = t_cn[0]
+                nxt["transit_high"] = t_cn[1]
         else:
-            if t_cn > t_now:
-                if nxt[kind] is None or t_cn < nxt[kind]:
-                    nxt[kind] = t_cn
+            if t_cn > t_now and (nxt[kind] is None or t_cn < nxt[kind]):
+                nxt[kind] = t_cn
   
     def fmt(dt):
         return dt.strftime("%m-%d %H:%M") if dt else None

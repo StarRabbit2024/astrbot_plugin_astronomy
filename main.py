@@ -5,7 +5,8 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 from .moon_phase import CN, moon_phase
-from .riseset import BODIES, day_riseset, now_status, _parse_riseset_args
+from .riseset import BODIES, _parse_riseset_args, day_riseset, now_status
+
 
 @register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.3")
 class MyPlugin(Star):
@@ -88,10 +89,10 @@ class MyPlugin(Star):
         result = day_riseset(pos_fn, self.lat, self.lon, h0, day)
 
         reply=(f"查询日期为{result['date_local']}时天体{body}的升落情况：\n"
-            f"升起时间：{result['rise_time']}，\n"
-            f"中天时间：{result['transit_time']}，\n"
-            f"中天高度：{result['transit_high']}，\n"
-            f"落下时间: {result['set_time']}。")
+               f"升起时间：{result['rise_time']}，\n"
+               f"中天时间：{result['transit_time']}，\n"
+               f"中天高度：{result['transit_high']}，\n"
+               f"落下时间: {result['set_time']}。")
 
         yield event.plain_result(reply)  # 发送一条纯文本消息
 
@@ -127,10 +128,73 @@ class MyPlugin(Star):
         result = day_riseset(pos_fn, self.lat, self.lon, h0, day)
 
         reply=(f"查询日期为{result['date_local']}时天体{body}的升落情况：\n"
-            f"升起时间：{result['rise_time']}，\n"
-            f"中天时间：{result['transit_time']}，\n"
-            f"中天高度：{result['transit_high']}，\n"
-            f"落下时间: {result['set_time']}。")
+               f"升起时间：{result['rise_time']}，\n"
+               f"中天时间：{result['transit_time']}，\n"
+               f"中天高度：{result['transit_high']}，\n"
+               f"落下时间: {result['set_time']}。")
+
+        return reply
+
+    @filter.command("risesetbody")
+    async def risesetbody_cmd(self, event: AstrMessageEvent):
+        """
+        查询指定的天体在此时的状态，以及下次的升落时间。默认查询太阳，直接回复。
+        """
+        message_str = event.message_str  # 用户发的纯文本消息字符串
+        message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
+        logger.info(message_chain)
+
+        idx = message_str.find("/risesetbody")
+        text = message_str[idx + len("/risesetbody") :]
+
+        try:
+            _, body, pos_fn, h0 = _parse_riseset_args(text)
+        except ValueError as e:
+            yield event.plain_result(f"参数没看懂：{e}\n格式示例：/risesetbody SUN")
+            return
+        
+        t_now = datetime.now()
+        result = now_status(pos_fn, self.lat, self.lon, h0, t_now)
+
+        reply=(f"当前查询天体为：{body}\n"
+               f"天体当前状态：{result['status']}，\n"
+               f"天体当前高度：{result['altitude']}，\n"
+               f"下一次升起时间：{result['next_rise_time']}，\n"
+               f"下一次中天时间：{result['next_transit_time']}，\n"
+               f"下一次中天高度：{result['next_transit_high']}，\n"
+               f"下一次落下时间: {result['next_set_time']}。")
+
+        yield event.plain_result(reply)  # 发送一条纯文本消息
+
+    @filter.llm_tool(name="get_riseset_body_tool")
+    async def get_riseset_body_tool(self, event: AstrMessageEvent, body: str = "SUN"):
+        """
+        查询指定的天体在此时的状态，以及下次的升落时间。
+        Args: body(str):查询天体，可省略，省略表示查询太阳（SUN）。
+        """
+        message_chain = (
+            event.get_messages()
+        )  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
+        logger.info(message_chain)
+
+        body = body.upper()
+        try:
+            if body not in BODIES:
+                raise ValueError(f"暂时只支持 SUN，收到的是 {body}")
+            pos_fn, h0 = BODIES[body]
+        except ValueError as e:
+            return f"参数没看懂：{e}\n格式要求：body:'SUN'"
+            
+        t_now = datetime.now()
+        result = now_status(pos_fn, self.lat, self.lon, h0, t_now)
+
+        reply=(f"当前查询天体为：{body}\n"
+               f"天体当前状态：{result['status']}，\n"
+               f"天体当前高度：{result['altitude']}，\n"
+               f"下一次升起时间：{result['next_rise_time']}，\n"
+               f"下一次中天时间：{result['next_transit_time']}，\n"
+               f"下一次中天高度：{result['next_transit_high']}，\n"
+               f"下一次落下时间: {result['next_set_time']}。")
 
         return reply
 
