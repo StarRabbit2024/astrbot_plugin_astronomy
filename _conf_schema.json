@@ -1,0 +1,14 @@
+{
+  "latitude": {
+    "type": "float",
+    "description": "观测点纬度（北纬为正，南纬为负）",
+    "hint": "例如北京故宫博物院纬度为39.92",
+    "default": 31.94
+  },
+  "longitude": {
+    "type": "float",
+    "description": "观测点经度（东经为正，西经为负）",
+    "hint": "例如北京故宫博物院经度为116.40",
+    "default": 118.79
+  }
+}
