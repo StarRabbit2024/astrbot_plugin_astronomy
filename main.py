@@ -219,7 +219,7 @@ class MyPlugin(Star):
             try:
                 time_data = datetime.strptime(time, "%Y-%m-%d")
             except ValueError:
-                return f"参数没看懂：日期格式 YYYY-MM-DD，收到的是 {time}"
+                yield event.plain_result( f"参数没看懂：日期格式 YYYY-MM-DD，收到的是 {time}")
 
         date_local = time_data.strftime("%Y-%m-%d")
         result = wrapper(time_data, self.lat, self.lon)

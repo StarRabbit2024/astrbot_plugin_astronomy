@@ -1,14 +1,120 @@
-# astrbot-plugin-helloworld
+# 天文信息查询工具
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+一个用于 AstrBot 的天文信息查询插件，支持月相、日月与八大行星升落、三级曙暮光，以及当日综合天文信息查询。既可以使用聊天命令，也可以通过 AstrBot 的大语言模型工具调用。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+- 插件名称：`astrbot_plugin_astronomy`
+- 当前版本：`v0.0.5`
+- 作者：数星星的小白兔
+- 项目地址：https://github.com/StarRabbit2024/astrbot_plugin_astronomy
 
-# Supports
+## 功能一览
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+- **月相查询**：计算指定时刻的近似月龄、月面照明率和八相名称。
+- **指定日期升落查询**：查询太阳、月球或八大行星在某个北京时间日期内的升起、中天和落下时间，以及中天高度。
+- **当前状态查询**：查询天体当前高度、是否位于地平线上，以及后续升落和中天信息。
+- **曙暮光查询**：分别计算民用、航海和天文晨光始、昏影终。
+- **今日观星汇总**：一次返回当日太阳、月球、行星、月相和曙暮光信息。
+
+## 安装
+
+### 通过仓库地址安装
+
+在 AstrBot 的插件管理功能中选择从仓库安装，填写：
+
+```text
+https://github.com/StarRabbit2024/astrbot_plugin_astronomy
+```
+
+### 手动安装
+
+将本插件目录放入 AstrBot 的插件目录，然后重启 AstrBot 或在插件管理中重新加载插件。
+
+插件计算部分仅使用 Python 标准库，运行时需要 AstrBot 提供的插件接口。
+
+## 配置
+
+在 AstrBot 插件配置中设置观测地点：
+
+| 配置项 | 含义 | 默认值 |
+| --- | --- | ---: |
+| `latitude` | 观测点纬度，北纬为正、南纬为负 | `31.94` |
+| `longitude` | 观测点经度，东经为正、西经为负 | `118.79` |
+
+经纬度使用十进制度数。例如，北纬 31.94°、东经 118.79° 分别填写 `31.94` 和 `118.79`。
+
+日期和时刻按**北京时间（UTC+8）**设计。使用“当前时刻”或“今天”等默认输入时，还应确保 AstrBot 所在设备的系统时间和时区设置正确。
+
+## 命令使用
+
+| 命令 | 用途 | 参数 |
+| --- | --- | --- |
+| `/moonphase [时间]` | 查询月相 | 时间格式为 `YYYY-MM-DD HH:MM`；省略时查询当前时刻 |
+| `/risesetday [日期] [天体]` | 查询指定日期的升落与中天 | 日期格式为 `YYYY-MM-DD`；日期和天体均可省略，默认查询当日太阳 |
+| `/risesetbody [天体]` | 查询天体当前状态和后续事件 | 省略天体时默认查询太阳 |
+| `/wrapperday [日期]` | 查询三级曙暮光 | 日期格式为 `YYYY-MM-DD`；省略时查询当日 |
+| `/今日观星` | 查询当日综合天文信息 | 无参数 |
+
+### 示例
+
+```text
+/moonphase
+/moonphase 2026-11-06 21:00
+/risesetday 2026-11-06 SUN
+/risesetday 2026-11-06 MARS
+/risesetbody MOON
+/wrapperday 2026-11-06
+/今日观星
+```
+
+### 支持的天体名称
+
+| 名称 | 天体 |
+| --- | --- |
+| `SUN` | 太阳 |
+| `MOON` | 月球 |
+| `MERCURY` | 水星 |
+| `VENUS` | 金星 |
+| `MARS` | 火星 |
+| `JUPITER` | 木星 |
+| `SATURN` | 土星 |
+| `URANUS` | 天王星 |
+| `NEPTUNE` | 海王星 |
+
+天体名称不区分大小写。
+
+## 输出说明
+
+- 日出、日落采用约 `-0.833°` 的高度阈值；月球采用约 `0.125°`；行星采用约 `-0.567°`。这些阈值用于近似计入视半径、大气折射或月球视差等影响。
+- “中天”指天体经过当地子午圈的上中天；“中天高度”为计算得到的地平高度，不是方位角。
+- 在高纬度地区，天体可能整日不升、不落，某个自然日内也可能没有完整的升起、中天和落下事件。
+- `/今日观星` 中的月相按当日北京时间 12:00 计算，其余项目按当日日期计算。
+- 插件不提供云量、能见度、视宁度、光污染或天气实况，因此不能仅凭输出判断实际观测条件。
+
+## 算法与精度
+
+本项目采用轻量级的本地近似计算，不依赖在线星历服务：
+
+- 太阳位置使用低精度解析公式。
+- 月球位置使用截断的周期项级数。
+- 行星位置由开普勒轨道根数和开普勒方程迭代求得。
+- 月龄按平均朔望月估算，照明率由月相角的余弦近似得到。
+- 升落事件通过球面天文公式和迭代修正计算。
+
+因此，结果适合日常科普、聊天查询和一般观测参考，不属于高精度星历。模型未完整处理光行时、周年光行差、章动、岁差、真实大气折射变化及观测点海拔等影响；月龄和照明率也不等同于精密星历结果。请勿将其用于精密测量、导航或其他对时间和位置精度要求较高的场景。
+
+## 文件结构
+
+```text
+astrbot_plugin_astronomy/
+├── main.py           # AstrBot 命令与大语言模型工具入口
+├── moon_phase.py     # 月相近似计算
+├── riseset.py        # 天体位置与升落计算
+├── almanac.py        # 曙暮光与当日信息汇总
+├── _conf_schema.json # 观测地点配置
+├── metadata.yaml     # 插件元数据
+└── LICENSE           # 许可证
+```
+
+## 许可证
+
+本项目采用 [GNU Affero General Public License v3.0](LICENSE)。

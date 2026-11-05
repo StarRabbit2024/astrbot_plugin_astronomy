@@ -248,7 +248,7 @@ def _events_on_base(base, pos_fn, lat, lon_east, h0, d_T):
     lat_rad = math.radians(lat)
     ra0, dec0 = pos_fn(base)
     ra1, dec1 = pos_fn(base + timedelta(days=1))
-    d_ra = (ra1 - ra0) % 24     # 小时/天
+    d_ra = (ra1 - ra0 + 12) % 24 - 12     # 小时/天
     d_dec = dec1 - dec0         # 度/天
 
     m0 = ((ra0*15 - theta0 + lon) / 360) % 1
@@ -316,13 +316,19 @@ def day_riseset(pos_fn, lat, lon_east, h0, date_local):
     events = _collect_events(pos_fn, lat, lon_east, h0, [base_z, day])
     result = {"date_local": day.date().isoformat(), "rise_time": None, "transit_time": None, "set_time": None, "transit_high": None}
     for kind, t_cn in events:
+        # 中天事件的 t_cn 是 [北京时间, 中天高度]，其余事件直接是北京时间
+        event_time = t_cn[0] if kind == "transit_time" else t_cn
+
+        # 升起、中天、落下都必须属于查询的北京时间日期
+        if event_time.date() != day.date():
+            continue
+
         if kind == "transit_time":
-            result[kind] = t_cn[0].strftime("%H:%M")
+            result[kind] = event_time.strftime("%H:%M")
             h = t_cn[1]
             result["transit_high"] = f"{h:.1f}°"
         else:
-            if t_cn.date() == day.date():
-                result[kind] = t_cn.strftime("%H:%M")
+            result[kind] = event_time.strftime("%H:%M")
     return result
 
 # ---------- 模式二：此刻状态 ----------
@@ -356,7 +362,7 @@ def now_status(pos_fn, lat, lon_east, h0, t_now: datetime):
     if alt > h0:
         status = "地平上"
     else:
-        status = "已落下"
+        status = "地平下"
 
     bases = [base0 + timedelta(days=k) for k in range(2)]
     events = _collect_events(pos_fn, lat, lon_east, h0, bases)
