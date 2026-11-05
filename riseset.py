@@ -1,4 +1,5 @@
 import math
+from functools import partial
 from datetime import datetime, timedelta
 
 SUN_H0 = -0.833
@@ -46,6 +47,18 @@ DEL_TERMS = [
     (   246.158,  2, -2, 0, 0),   # cos(2M' - 2D)
     (  -152.138,  1, -2, 0, 1),   # cos(M + M' - 2D)
 ]
+
+PLANET_ELEMENTS = {
+    #          a(AU)        e          i(°)       L(°)        ϖ(°)       Ω(°)
+    "MERCURY": ((0.38709927, 0.00000037), (0.20563593, 0.00001906), (7.00497902, -0.00594749), (252.25032350, 149472.67411175), (77.45779628, 0.16047689), (48.33076593, -0.12534081)),
+    "VENUS":   ((0.72333566, 0.00000390), (0.00677672, -0.00004107), (3.39467605, -0.00078890), (181.97909950, 58517.81538729), (131.56460914, 0.00268329), (76.67984255, -0.27769418)),
+    "EARTH":   ((1.00000261, 0.00000562), (0.01671123, -0.00004392), (-0.00001531, -0.01294668), (100.46457166, 35999.37244981), (102.93768193, 0.32327364), (0.0, 0.0)),
+    "MARS":    ((1.52371034, 0.00001847), (0.09339410, 0.00007882), (1.84969142, -0.00813131), (-4.55343205, 19140.30268499), (-23.94362959, 0.44441088), (49.55953891, -0.29257343)),
+    "JUPITER": ((5.20288700, -0.00011607), (0.04838624, -0.00013253), (1.30439695, -0.00183714), (34.39644051, 3034.74612775), (14.72847983, 0.21252668), (100.47390909, 0.20469106)),
+    "SATURN":  ((9.53667594, -0.00125060), (0.05386179, -0.00050991), (2.48599187, 0.00193609), (49.95424423, 1222.49362201), (92.59887831, -0.41897216), (113.66242448, -0.28867794)),
+    "URANUS":  ((19.18916464, -0.00196176), (0.04725744, -0.00004397), (0.77263783, -0.00242939), (313.23810451, 428.48202785), (170.95427630, 0.40805281), (74.01692503, 0.04240589)),
+    "NEPTUNE": ((30.06992276, 0.00026291), (0.00859048, 0.00005105), (1.77004347, 0.00035372), (-55.12002969, 218.45945325), (44.96476227, -0.32241464), (131.78422574, -0.00508664)),
+}
 
 
 def d_j2000(dt: datetime): 
@@ -117,6 +130,81 @@ def moon_pos(t: datetime):
     ε = 23.4392911 - 0.0130042*T
     λ_rad = math.radians(λ)
     β_rad = math.radians(β)
+    ε_rad = math.radians(ε)
+
+    RA = math.atan2(math.sin(λ_rad)*math.cos(ε_rad) - math.tan(β_rad)*math.sin(ε_rad), math.cos(λ_rad))
+    Dec = math.asin(math.sin(β_rad)*math.cos(ε_rad) + math.cos(β_rad)*math.sin(ε_rad)*math.sin(λ_rad))
+
+    dec_deg = math.degrees(Dec)
+    ra_hours = math.degrees(RA) / 15 % 24
+
+    return (ra_hours, dec_deg)
+
+def planet_pos(t: datetime, name):
+    """
+    计算目标时间各行星在天球上的坐标。
+    输入: 一个 datetime UTC，行星名称（如MARS）name
+    返回: (赤经(小时), 赤纬(度))
+    """
+
+    T =  d_j2000(t) / 36525
+
+    def iterate(M_r, e_r):
+        """
+        解开普勒方程 E - e*sin(E) = M  （M、E 均为弧度）
+        返回偏近点角 E
+        """
+        E = M_r
+        for _ in range(5):
+            f = E - e_r*math.sin(E) - M_r
+            fp = 1 - e_r*math.cos(E)
+            E = E - f/fp
+        return E
+
+    def root_to_xyz(n):
+        (a, d_a), (e, d_e), (i, d_i), (l, d_l), (o, d_o), (Ω, d_Ω) = PLANET_ELEMENTS[n]
+
+        # 轨道六根数 
+        a += d_a*T
+        e += d_e*T
+        i += d_i*T
+        l += d_l*T
+        o += d_o*T
+        Ω += d_Ω*T
+
+        ω = o - Ω               # 近日点幅角
+        M = wrap180(l - o)      # 平近点角
+
+        E = iterate(math.radians(M), e)
+
+        x_orb = a*(math.cos(E) - e)
+        y_orb = a*math.sqrt((1-e**2))*math.sin(E)
+
+        cosΩ = math.cos(math.radians(Ω))
+        sinΩ = math.sin(math.radians(Ω))
+        cosω = math.cos(math.radians(ω))
+        sinω = math.sin(math.radians(ω))
+        cosi = math.cos(math.radians(i))
+        sini = math.sin(math.radians(i))
+
+        x = (cosΩ*cosω - sinΩ*sinω*cosi)*x_orb + (-cosΩ*sinω - sinΩ*cosω*cosi)*y_orb
+        y = (sinΩ*cosω + cosΩ*sinω*cosi)*x_orb + (-sinΩ*sinω + cosΩ*cosω*cosi)*y_orb
+        z = (sinω*sini)*x_orb + (cosω*sini)*y_orb
+
+        return x, y, z
+
+
+    planet_x, planet_y, planet_z = root_to_xyz(name)
+    earth_x, earth_y, earth_z = root_to_xyz("EARTH")
+
+    real_x = planet_x - earth_x
+    real_y = planet_y - earth_y
+    real_z = planet_z - earth_z
+
+    λ_rad = math.atan2(real_y, real_x)
+    β_rad = math.atan2(real_z, math.sqrt(real_x**2 + real_y**2))
+
+    ε = 23.4392911
     ε_rad = math.radians(ε)
 
     RA = math.atan2(math.sin(λ_rad)*math.cos(ε_rad) - math.tan(β_rad)*math.sin(ε_rad), math.cos(λ_rad))
@@ -299,7 +387,15 @@ def now_status(pos_fn, lat, lon_east, h0, t_now: datetime):
         }
 
 # ---------- 支持统计 ----------
-BODIES = {"SUN": (sun_pos, SUN_H0),"MOON": (moon_pos, MOON_H0)}
+BODIES = {"SUN": (sun_pos, SUN_H0),
+          "MOON": (moon_pos, MOON_H0),
+          "MERCURY":  (partial(planet_pos, name="MERCURY"), STAR_H0),
+          "VENUS":  (partial(planet_pos, name="VENUS"), STAR_H0),
+          "MARS":  (partial(planet_pos, name="MARS"), STAR_H0),
+          "JUPITER":  (partial(planet_pos, name="JUPITER"), STAR_H0),
+          "SATURN":  (partial(planet_pos, name="SATURN"), STAR_H0),
+          "URANUS":  (partial(planet_pos, name="URANUS"), STAR_H0),
+          "NEPTUNE":  (partial(planet_pos, name="NEPTUNE"), STAR_H0)}
 
 # ---------- 命令解析 ----------
 def _parse_riseset_args(text: str):

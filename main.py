@@ -72,6 +72,7 @@ class MyPlugin(Star):
     async def risesetday_cmd(self, event: AstrMessageEvent):
         """
         查询指定日期的天体升落情况。从消息文本解析时间（输入日期格式YYYY-MM-DD（北京时间），默认查询当日太阳），直接回复。
+        当前支持SUN，MOON，八大行星。
         """
         message_str = event.message_str  # 用户发的纯文本消息字符串
         message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
@@ -99,7 +100,7 @@ class MyPlugin(Star):
     @filter.llm_tool(name="get_riseset_day_tool")
     async def get_riseset_day_tool(self, event: AstrMessageEvent, time: str | None = None, body: str = "SUN"):
         """
-        查询指定日期的天体升落情况。
+        查询指定日期的天体升落情况。当前支持SUN，MOON，八大行星。
         Args:time(str): 查询时间，格式 YYYY-MM-DD（北京时间）。可省略，省略表示当前日期。
         body(str):查询天体，可省略，省略表示查询太阳（SUN）
         """
@@ -139,6 +140,7 @@ class MyPlugin(Star):
     async def risesetbody_cmd(self, event: AstrMessageEvent):
         """
         查询指定的天体在此时的状态，以及下次的升落时间。默认查询太阳，直接回复。
+        当前支持SUN，MOON，八大行星。
         """
         message_str = event.message_str  # 用户发的纯文本消息字符串
         message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
@@ -169,7 +171,7 @@ class MyPlugin(Star):
     @filter.llm_tool(name="get_riseset_body_tool")
     async def get_riseset_body_tool(self, event: AstrMessageEvent, body: str = "SUN"):
         """
-        查询指定的天体在此时的状态，以及下次的升落时间。
+        查询指定的天体在此时的状态，以及下次的升落时间。当前支持SUN，MOON，八大行星。
         Args: body(str):查询天体，可省略，省略表示查询太阳（SUN）。
         """
         message_chain = (
