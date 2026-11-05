@@ -22,11 +22,9 @@ def normalize(dt: datetime) -> datetime:
 def moon_phase(time_data: datetime) -> dict:
     """
     输入: 一个 datetime（带时区信息最佳，不带就当CN东八区）
-    返回: {
-        "age": 月相年龄(天, 0~29.53)字符串,
-        "illumination": 照亮比例(0%~100%)字符串,
-        "phase_name": "盈凸月" 等中文八相名
-    }
+    返回: {"age": 月相年龄(天, 0~29.53)字符串,
+    "illumination": 照亮比例(0%~100%)字符串,
+    "phase_name": "盈凸月" 等中文八相名}
     """
     time_data = normalize(time_data)  # 与标准位置计算时间差
     delta_time = time_data - standard_date

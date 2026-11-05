@@ -1,6 +1,6 @@
 import math
-from functools import partial
 from datetime import datetime, timedelta
+from functools import partial
 
 SUN_H0 = -0.833
 MOON_H0 = 0.125
@@ -125,7 +125,7 @@ def moon_pos(t: datetime):
 
     λ = L_m + sum(C0*sin(C1*M_m+C2*D+C3*F+C4*M) * (E if C5 else 1.0) for C0, C1, C2, C3, C4, C5 in LON_TERMS)         # 月亮黄经
     β = sum(C0*sin(C1*M_m+C2*D+C3*F) for C0, C1, C2, C3 in LAT_TERMS)                                                 # 月亮黄纬
-    Δ = 385000.56 + sum(C0*cos(C1*M_m+C2*D+C3*F+C4*M) for C0, C1, C2, C3, C4 in DEL_TERMS)                            # 月地距离(km)
+    #Δ = 385000.56 + sum(C0*cos(C1*M_m+C2*D+C3*F+C4*M) for C0, C1, C2, C3, C4 in DEL_TERMS)                            # 月地距离(km)
 
     ε = 23.4392911 - 0.0130042*T
     λ_rad = math.radians(λ)
@@ -178,7 +178,7 @@ def planet_pos(t: datetime, name):
         E = iterate(math.radians(M), e)
 
         x_orb = a*(math.cos(E) - e)
-        y_orb = a*math.sqrt((1-e**2))*math.sin(E)
+        y_orb = a*math.sqrt(1-e**2)*math.sin(E)
 
         cosΩ = math.cos(math.radians(Ω))
         sinΩ = math.sin(math.radians(Ω))

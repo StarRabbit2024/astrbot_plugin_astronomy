@@ -4,11 +4,12 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
+from .almanac import today_summary, wrapper
 from .moon_phase import CN, moon_phase
 from .riseset import BODIES, _parse_riseset_args, day_riseset, now_status
 
 
-@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.4")
+@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.5")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -182,7 +183,7 @@ class MyPlugin(Star):
         body = body.upper()
         try:
             if body not in BODIES:
-                raise ValueError(f"暂时只支持 SUN，收到的是 {body}")
+                raise ValueError(f"暂时只支持{'、'.join(BODIES)}，收到的是 {body}")
             pos_fn, h0 = BODIES[body]
         except ValueError as e:
             return f"参数没看懂：{e}\n格式要求：body:'SUN'"
@@ -198,6 +199,75 @@ class MyPlugin(Star):
                f"下一次中天高度：{result['next_transit_high']}，\n"
                f"下一次落下时间: {result['next_set_time']}。")
 
+        return reply
+
+    @filter.command("wrapperday")
+    async def wrapperday_cmd(self, event: AstrMessageEvent):
+        """
+        查询指定日期的蒙影情况。从消息文本解析时间（输入日期格式YYYY-MM-DD（北京时间），默认查询当日），直接回复。
+        """
+        message_str = event.message_str  # 用户发的纯文本消息字符串
+        message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
+        logger.info(message_chain)
+
+        idx = message_str.find("/wrapperday")
+        time = message_str[idx + len("/wrapperday") :].strip() or None
+
+        if time is None:
+            time_data = datetime.now()
+        else:
+            try:
+                time_data = datetime.strptime(time, "%Y-%m-%d")
+            except ValueError:
+                return f"参数没看懂：日期格式 YYYY-MM-DD，收到的是 {time}"
+
+        date_local = time_data.strftime("%Y-%m-%d")
+        result = wrapper(time_data, self.lat, self.lon)
+
+        reply=(f"查询日期为{date_local}的蒙影情况：\n"
+               f"{result}")
+
+        yield event.plain_result(reply)  # 发送一条纯文本消息
+
+    @filter.llm_tool(name="get_wrapper_day_tool")
+    async def get_wrapper_day_tool(self, event: AstrMessageEvent, time: str | None = None):
+        """
+        查询指定日期的蒙影情况。
+        Args:time(str): 查询时间，格式 YYYY-MM-DD（北京时间）。可省略，省略表示当天。
+        """
+        message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
+        logger.info(message_chain)
+
+        if time is None:
+            time_data = datetime.now()
+        else:
+            try:
+                time_data = datetime.strptime(time, "%Y-%m-%d")
+            except ValueError:
+                return f"参数没看懂：日期格式 YYYY-MM-DD，收到的是 {time}"
+
+        date_local = time_data.strftime("%Y-%m-%d")
+        result = wrapper(time_data, self.lat, self.lon)
+
+        reply=(f"查询日期为{date_local}的蒙影情况：\n"
+               f"{result}")
+
+        return reply
+
+    @filter.command("今日观星")
+    async def today_star(self, event: AstrMessageEvent):
+        """
+        一次查询当天的综合天文信息，包括主要天体升落，月相，蒙影等。
+        """
+        reply=today_summary(self.lat, self.lon)
+        yield event.plain_result(reply)  # 发送一条纯文本消息
+
+    @filter.llm_tool(name="get_today_star_tool")
+    async def get_today_star_tool(self, event: AstrMessageEvent):
+        """
+        一次查询当天的综合天文信息，包括主要天体升落，月相，蒙影等。可以用于回答今晚/今天是否适合观星、何时适合拍摄等笼统问题。
+        """
+        reply=today_summary(self.lat, self.lon)
         return reply
 
     async def terminate(self):
