@@ -8,7 +8,7 @@ from .moon_phase import CN, moon_phase
 from .riseset import BODIES, _parse_riseset_args, day_riseset, now_status
 
 
-@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.3")
+@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.4")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -119,7 +119,7 @@ class MyPlugin(Star):
         body = body.upper()
         try:
             if body not in BODIES:
-                raise ValueError(f"暂时只支持 SUN，收到的是 {body}")
+                raise ValueError(f"暂时只支持{'、'.join(BODIES)}，收到的是 {body}")
             pos_fn, h0 = BODIES[body]
         except ValueError as e:
             return f"参数没看懂：{e}\n格式要求：time:YYYY-MM-DD，body:'SUN'"

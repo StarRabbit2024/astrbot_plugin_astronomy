@@ -2,7 +2,51 @@ import math
 from datetime import datetime, timedelta
 
 SUN_H0 = -0.833
+MOON_H0 = 0.125
 STAR_H0 = -0.567
+
+LON_TERMS = [
+    # (振幅,  M',  D,  F,  M, 乘E)
+    ( 6.288774,  1, 0,  0,  0, 1),
+    ( 1.274027, -1, 2,  0,  0, 1),
+    ( 0.658314,  0, 2,  0,  0, 1),
+    ( 0.213618,  2, 0,  0,  0, 1),
+    (-0.185116,  0, 0,  0,  1, 1),
+    (-0.114332,  0, 0,  2,  0, 0),
+    ( 0.058793, -2, 2,  0,  0, 0),
+    ( 0.057066, -1, 2,  0, -1, 1),
+    ( 0.053322,  1, 2,  0,  0, 1),
+    ( 0.045758,  0, 2,  0, -1, 0),
+    (-0.040923, -1, 0,  0,  1, 1),
+    (-0.034720,  0, 1,  0,  0, 0),
+    (-0.030383,  1, 0,  0,  1, 1),
+    ( 0.015327,  0, 2, -2,  0, 0),
+]
+
+LAT_TERMS = [
+    # (振幅,  M',  D,  F)
+    (5.128122,  0, 0,  1),
+    (0.280602,  1, 0,  1),
+    (0.277693,  1, 0, -1),
+    (0.173238,  0, 2, -1),
+    (0.055413, -1, 2,  1),
+    (0.046272, -1, 2, -1),
+    (0.032573,  0, 2,  1),
+    (0.017198,  1, 2, -1),
+]
+
+DEL_TERMS = [
+    # (振幅km,  M',  D,  F,  M)
+    (-20905.355,  1,  0, 0, 0),   # cos(M')
+    ( -3699.111, -1,  2, 0, 0),   # cos(2D - M')
+    ( -2955.968,  0,  2, 0, 0),   # cos(2D)
+    (  -569.925,  2,  0, 0, 0),   # cos(2M')
+    (    48.888,  0,  0, 0, 1),   # cos(M)
+    (    -3.149,  0,  0, 2, 0),   # cos(2F)
+    (   246.158,  2, -2, 0, 0),   # cos(2M' - 2D)
+    (  -152.138,  1, -2, 0, 1),   # cos(M + M' - 2D)
+]
+
 
 def d_j2000(dt: datetime): 
     """
@@ -42,6 +86,45 @@ def sun_pos(t: datetime):
     dec_deg = math.degrees(Dec)
     ra_hours = math.degrees(RA) / 15 % 24
     
+    return (ra_hours, dec_deg)
+
+def moon_pos(t: datetime):
+    """
+    计算目标时间月亮在天球上的坐标。
+    输入: 一个 datetime UTC
+    返回: (赤经(小时), 赤纬(度))
+    """
+    T =  d_j2000(t) / 36525
+
+    L_m = 218.3164477 + 481267.88123421*T - 0.0015786*T**2 + T**3/538841 - T**4/65194000    # 月亮平黄经
+    M  = 357.5291092 + 35999.0502909*T - 0.0001536*T**2 + T**3/24490000                     # 太阳平近点角
+    M_m = 134.9633964 + 477198.8675055*T + 0.0087414*T**2 + T**3/69699 - T**4/14712000      # 月亮平近点角
+
+    D  = 297.8501921 + 445267.1114034*T - 0.0018819*T**2 + T**3/545868 - T**4/113065000
+    F  = 93.2720950 + 483202.0175233*T - 0.0036539*T**2 - T**3/3526000 + T**4/863310000
+    E = 1 - 0.002516*T - 0.0000074*T**2                                                     # 地球轨道偏心率因子（带 M 的项要乘 E）
+
+    def sin(x):
+        return math.sin(math.radians(x))
+    
+    def cos(x):
+        return math.cos(math.radians(x))
+
+    λ = L_m + sum(C0*sin(C1*M_m+C2*D+C3*F+C4*M) * (E if C5 else 1.0) for C0, C1, C2, C3, C4, C5 in LON_TERMS)         # 月亮黄经
+    β = sum(C0*sin(C1*M_m+C2*D+C3*F) for C0, C1, C2, C3 in LAT_TERMS)                                                 # 月亮黄纬
+    Δ = 385000.56 + sum(C0*cos(C1*M_m+C2*D+C3*F+C4*M) for C0, C1, C2, C3, C4 in DEL_TERMS)                            # 月地距离(km)
+
+    ε = 23.4392911 - 0.0130042*T
+    λ_rad = math.radians(λ)
+    β_rad = math.radians(β)
+    ε_rad = math.radians(ε)
+
+    RA = math.atan2(math.sin(λ_rad)*math.cos(ε_rad) - math.tan(β_rad)*math.sin(ε_rad), math.cos(λ_rad))
+    Dec = math.asin(math.sin(β_rad)*math.cos(ε_rad) + math.cos(β_rad)*math.sin(ε_rad)*math.sin(λ_rad))
+
+    dec_deg = math.degrees(Dec)
+    ra_hours = math.degrees(RA) / 15 % 24
+
     return (ra_hours, dec_deg)
 
 def _refine(m, kind, ctx: dict):                    
@@ -216,7 +299,7 @@ def now_status(pos_fn, lat, lon_east, h0, t_now: datetime):
         }
 
 # ---------- 支持统计 ----------
-BODIES = {"SUN": (sun_pos, SUN_H0)}
+BODIES = {"SUN": (sun_pos, SUN_H0),"MOON": (moon_pos, MOON_H0)}
 
 # ---------- 命令解析 ----------
 def _parse_riseset_args(text: str):
@@ -233,7 +316,7 @@ def _parse_riseset_args(text: str):
             body = p.upper()
 
     if body not in BODIES:
-        raise ValueError(f"暂时只支持 SUN，收到的是 {body}")
+        raise ValueError(f"暂时只支持{'、'.join(BODIES)}，收到的是 {body}")
     if day is None:                                    # 只给天体没给日期 → 今天
         day = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     return day, body, *BODIES[body]
@@ -242,8 +325,11 @@ if __name__ == "__main__":
     # sun_pos 若在本文件上方定义则直接用；在别的模块就改成 import
     from datetime import date
     today = datetime.combine(date.today(), datetime.min.time())
-    print(day_riseset(sun_pos, 31.94, 118.79, SUN_H0, today))
-    print(now_status(sun_pos, 31.94, 118.79, SUN_H0, datetime.now()))
+    test = datetime(1992,4,12,0,0,0)
+
+    print(moon_pos(test))
+    print(day_riseset(moon_pos, 31.94, 118.79, MOON_H0, today))
+    print(now_status(moon_pos, 31.94, 118.79, MOON_H0, datetime.now()))
 
 
 
