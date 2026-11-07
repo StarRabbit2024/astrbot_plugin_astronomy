@@ -147,10 +147,11 @@ def fetch_astro(lat, lon):
 
     # 两条路汇合后统一转换
     init = data["init"]
-    dataseries = data["dataseries"]
-    for i in dataseries:
-        i["timepoint"] = datetime.strptime(init, "%Y%m%d%H") + timedelta(hours=8 + i["timepoint"])
-
+    dataseries = []
+    for i in data["dataseries"]:
+        new_i = dict(i)
+        new_i["timepoint"] = datetime.strptime(init, "%Y%m%d%H") + timedelta(hours=8 + i["timepoint"])
+        dataseries.append(new_i)
 
     buckets = {}                       # key: (date, "夜"/"晨") → 槽列表
     for i in dataseries:
