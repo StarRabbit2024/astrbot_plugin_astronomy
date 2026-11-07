@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 
 from astrbot.api import AstrBotConfig, logger
@@ -7,9 +8,10 @@ from astrbot.api.star import Context, Star, register
 from .almanac import today_summary, wrapper
 from .moon_phase import CN, moon_phase
 from .riseset import BODIES, _parse_riseset_args, day_riseset, now_status
+from .starnet import fetch_astro, fetch_llm_astro
 
 
-@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.5")
+@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.6")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -265,10 +267,33 @@ class MyPlugin(Star):
     @filter.llm_tool(name="get_today_star_tool")
     async def get_today_star_tool(self, event: AstrMessageEvent):
         """
-        一次查询当天的综合天文信息，包括主要天体升落，月相，蒙影等。可以用于回答今晚/今天是否适合观星、何时适合拍摄等笼统问题。
+        一次查询当天的综合天文信息，包括主要天体升落，月相，蒙影等。
         """
         reply=today_summary(self.lat, self.lon)
         return reply
+
+    @filter.command("晴天钟")
+    async def qitianzhong(self, event: AstrMessageEvent):
+        """
+        调用晴天钟官方接口。返回未来72小时晴天钟图表以及夜晚观星条件打分。
+        """
+        image_url = f"https://www.7timer.info/bin/astro.php?lon={self.lon}&lat={self.lat}&lang=zh-CN&ac=0&unit=metric&tzshift=0"
+        reply = await asyncio.to_thread(fetch_astro, self.lat, self.lon)
+
+        yield event.plain_result(reply)
+        yield event.image_result(image_url)
+
+    @filter.llm_tool("get_7time_tool")
+    async def get_7time_tool(self, event: AstrMessageEvent):
+        """
+        调用晴天钟官方接口。返回未来72小时晴天钟详细数据。
+        当问及未来72小时内的观星条件时，应优先调用该工具。如果问题涉及更遥远时间的天气可以调用其他天气工具。
+        该工具无法解决涉及天体的具体位置，晨昏蒙影以及日月升落的问题。
+        """
+        
+        reply = await asyncio.to_thread(fetch_llm_astro, self.lat, self.lon)
+        return reply
+
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
