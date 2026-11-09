@@ -168,23 +168,40 @@ def fetch_astro(lat, lon):
     return _report(lat, lon, buckets)
 
 def fetch_llm_astro(lat, lon):
-    """
-    URL拉取晴天钟json数据，简化整理，转化为提供给LLM的字符串。
-    """
+    """获取晴天钟数据并转化为供 LLM 使用的文本，缺测值显示为“无数据”。"""
     data = _fetch_raw(lat, lon)
     if data is None:
-        return "与晴天钟的链接出现问题！天文预报获取失败。"    
+        return "与晴天钟的链接出现问题！天文预报获取失败。"
+
+    def scale_text(table, value):
+        if isinstance(value, int) and 1 <= value < len(table):
+            return table[value]
+        return "无数据"
+
+    def humidity_text(value):
+        if isinstance(value, (int, float)) and -4 <= value <= 16:
+            return f"{(value + 4.5) * 5:.0f}%"
+        return "无数据"
+
+    def temperature_text(value):
+        if isinstance(value, (int, float)) and -100 <= value <= 60:
+            return f"{value}℃"
+        return "无数据"
+
     lines = []
     for i in data["dataseries"]:
         t = datetime.strptime(data["init"], "%Y%m%d%H") + timedelta(hours=8 + i["timepoint"])
         if not (17 <= t.hour <= 23 or 0 <= t.hour <= 8):
             continue  # 白天和黄昏槽不要
+        prec_type = i.get("prec_type")
+        if not isinstance(prec_type, str) or not prec_type:
+            prec_type = "无数据"
         lines.append(
             f"{t.month}月{t.day}日{t.hour}时："
-            f"云量{_CLOUD_TXT[i['cloudcover']]}，"
-            f"视宁度{_SEEING_TXT[i['seeing']]}，"
-            f"透明度{_TRANS_TXT[i['transparency']]}，"
-            f"湿度{(i['rh2m'] + 4.5) * 5:.0f}%，"
-            f"降水：{i['prec_type']}，气温{i['temp2m']}℃"
-            )
-    return "以下为未来3天逐时段天文预报（北京时间）：\n" + "\n".join(lines)      
+            f"云量{scale_text(_CLOUD_TXT, i.get('cloudcover'))}，"
+            f"视宁度{scale_text(_SEEING_TXT, i.get('seeing'))}，"
+            f"透明度{scale_text(_TRANS_TXT, i.get('transparency'))}，"
+            f"湿度{humidity_text(i.get('rh2m'))}，"
+            f"降水：{prec_type}，气温{temperature_text(i.get('temp2m'))}"
+        )
+    return "以下为未来3天逐时段天文预报（北京时间）：\n" + "\n".join(lines)

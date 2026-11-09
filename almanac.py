@@ -4,16 +4,22 @@ from .moon_phase import moon_phase
 from .riseset import BODIES, day_riseset
 
 TWILIGHT = {"民用": -6.0, "航海": -12.0, "天文": -18.0}
+PLANETS = ("MERCURY", "VENUS", "MARS", "JUPITER","SATURN", "URANUS", "NEPTUNE")
 
 def _twilight_line(name, h0, r):
-    """
-    输出为单级蒙影报告文本。r为单次计算结果。
-    """
-    if r["rise_time"] is not None:
-        return f"{name}晨光始 {r['rise_time']}，{name}昏影终 {r['set_time']}；"
-    # 能走到这里，太阳当天必不跨越 h0：要么全天在其上（极昼型），要么全天下在其下（极夜型）
-    # transit_high 是当日太阳最大高度角，用它和 h0 比即可二选一
-    if r["transit_high"] > h0:
+    """输出单级曙暮光；分别处理完整、仅有一个和全天无跨越事件。"""
+    rise = r["rise_time"]
+    set_ = r["set_time"]
+    if rise is not None and set_ is not None:
+        return f"{name}晨光始 {rise}，{name}昏影终 {set_}；"
+    if rise is not None:
+        return f"{name}晨光始 {rise}，当日无{name}昏影终；"
+    if set_ is not None:
+        return f"当日无{name}晨光始，{name}昏影终 {set_}；"
+
+    # 无跨越事件时，用当日上中天高度区分全天高于或低于阈值。
+    transit_high = r["transit_high"]
+    if transit_high is not None and float(transit_high.removesuffix("°")) > h0:
         return f"无{name}夜（太阳终日高于 {h0}°）；"
     return f"全天处于{name}夜；"
 
@@ -77,9 +83,8 @@ def today_summary(lat, lon):
     # 行星段：for name, (pos_fn, h0) in BODIES.items()，跳过 SUN/MOON，逐颗 day_riseset
 
     planet_list = []
-    for name, (pos_fn, h0) in BODIES.items():
-        if name in ("SUN", "MOON"):
-            continue
+    for name in PLANETS:
+        pos_fn, h0 = BODIES[name]
         r = day_riseset(pos_fn, lat, lon, h0, today)
         one_result = _planet_line(name, r)
         planet_list.append(one_result)

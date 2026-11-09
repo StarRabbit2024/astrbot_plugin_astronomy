@@ -259,13 +259,13 @@ def _events_on_base(base, pos_fn, lat, lon_east, h0, d_T):
     h0_rad = math.radians(h0)
     cos_h0 = ((math.sin(h0_rad) - math.sin(lat_rad)*math.sin(dec0_rad))/(math.cos(lat_rad)*math.cos(dec0_rad)))
 
-    if cos_h0 >= 1:                       # 拱极：永不落，只有中天
+    if cos_h0 >= 1:                       # 连上中天都低于阈值：永不升
+        return []
+    if cos_h0 <= -1:                      # 连下中天都高于阈值：永不落，只有上中天
         m = _refine(m0, "transit", ctx)
         dec_t = dec0 + d_dec*(m + d_T/86400)
         h = 90 - abs(lat - dec_t)
         return [("transit_time", [m, h])]
-    if cos_h0 <= -1:                      # 永不升
-        return []
 
     H0 = math.degrees(math.acos(cos_h0))
     m = _refine(m0, "transit", ctx)
@@ -403,22 +403,33 @@ BODIES = {"SUN": (sun_pos, SUN_H0),
           "URANUS":  (partial(planet_pos, name="URANUS"), STAR_H0),
           "NEPTUNE":  (partial(planet_pos, name="NEPTUNE"), STAR_H0)}
 
+
+def normalize_body_name(name: str) -> str:
+    """统一日月、行星和深空天体别名的大小写与空格。"""
+    if not isinstance(name, str):
+        return ""
+    return name.strip().upper().replace(" ", "").replace("　", "")
+
+
 # ---------- 命令解析 ----------
 def _parse_riseset_args(text: str):
     """
-    '2026-11-04 SUN' → (day, pos_fn, h0)，解析失败抛 ValueError(中文提示)
+    '2026-11-04 NGC 224' → (day, body, pos_fn, h0)。
+    日期可省略；天体名称保留完整文本，因此支持带空格的编号和英文别名。
     """
-    parts = text.split()
-    day, body = None, "SUN"
+    parts = text.strip().split()
+    day = None
+    body_parts = []
 
     for p in parts:
-        if "-" in p:                                   # 带横线的一段当日期
+        if "-" in p and day is None:                   # 带横线的一段当日期
             day = datetime.strptime(p, "%Y-%m-%d")     # 格式不对自动抛 ValueError
         else:
-            body = p.upper()
+            body_parts.append(p)
 
+    body = normalize_body_name(" ".join(body_parts) or "SUN")
     if body not in BODIES:
-        raise ValueError(f"暂时只支持{'、'.join(BODIES)}，收到的是 {body}")
+        raise ValueError(f"暂时只支持日月、八大行星及已收录深空天体，可用中文名/M/NGC/IC 编号或英文别名查询，收到的是 {body}")
     if day is None:                                    # 只给天体没给日期 → 今天
         day = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     return day, body, *BODIES[body]

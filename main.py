@@ -7,22 +7,30 @@ from astrbot.api.star import Context, Star, register
 
 from .almanac import today_summary, wrapper
 from .moon_phase import CN, moon_phase
-from .riseset import BODIES, _parse_riseset_args, day_riseset, now_status
+from .riseset import BODIES, _parse_riseset_args, day_riseset, normalize_body_name, now_status
 from .starnet import fetch_astro, fetch_llm_astro
+from .skydb import register_bodies, tonight_targets, query_celestial
 
 
-@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.6")
+def _command_args(message_str: str) -> str:
+    """去掉首个命令字段，保留后续完整参数（包括天体名称中的空格）。"""
+    parts = message_str.strip().split(maxsplit=1)
+    return parts[1].strip() if len(parts) > 1 else ""
+
+
+@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.7")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config=config
         self.lat = float(config.get("latitude", 31.94))
         self.lon = float(config.get("longitude", 118.79))
+        register_bodies(BODIES)
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
 
-    @filter.command("moonphase")
+    @filter.command("月相")
     async def moonphase_cmd(self, event: AstrMessageEvent):
         """
         查询指定时刻的月相。从消息文本解析时间（输入日期格式YYYY-MM-DD HH:MM（北京时间），默认现在），直接回复。
@@ -31,14 +39,17 @@ class MyPlugin(Star):
         message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
         logger.info(message_chain)
 
-        idx = message_str.find("/moonphase")
-        time = message_str[idx + len("/moonphase") :].strip() or None
+        time = _command_args(message_str) or None
 
         if time is None:
             time_data = datetime.now(CN)
         else:
-            time_data = datetime.strptime(time, "%Y-%m-%d %H:%M")
-            time_data = time_data.replace(tzinfo=CN)
+            try:
+                time_data = datetime.strptime(time, "%Y-%m-%d %H:%M")
+                time_data = time_data.replace(tzinfo=CN)
+            except ValueError:
+                yield event.plain_result(f"参数没看懂：时间格式 YYYY-MM-DD HH:MM，收到的是 {time}")
+                return
 
         data_dict = moon_phase(time_data)
         show_time = time_data.strftime("%Y-%m-%d %H:%M")
@@ -62,8 +73,11 @@ class MyPlugin(Star):
         if time is None:
             time_data = datetime.now(CN)
         else:
-            time_data = datetime.strptime(time, "%Y-%m-%d %H:%M")
-            time_data = time_data.replace(tzinfo=CN)
+            try:
+                time_data = datetime.strptime(time, "%Y-%m-%d %H:%M")
+                time_data = time_data.replace(tzinfo=CN)
+            except ValueError:
+                return f"参数没看懂：时间格式 YYYY-MM-DD HH:MM，收到的是 {time}"
 
         data_dict = moon_phase(time_data)
         show_time = time_data.strftime("%Y-%m-%d %H:%M")
@@ -71,23 +85,22 @@ class MyPlugin(Star):
 
         return reply
 
-    @filter.command("risesetday")
+    @filter.command("当日升落")
     async def risesetday_cmd(self, event: AstrMessageEvent):
         """
         查询指定日期的天体升落情况。从消息文本解析时间（输入日期格式YYYY-MM-DD（北京时间），默认查询当日太阳），直接回复。
-        当前支持SUN，MOON，八大行星。
+        当前支持SUN、MOON、八大行星、M1~M110、以及常见深空天体，可用中文名/M/NGC 编号查询。
         """
         message_str = event.message_str  # 用户发的纯文本消息字符串
         message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
         logger.info(message_chain)
 
-        idx = message_str.find("/risesetday")
-        text = message_str[idx + len("/risesetday") :]
+        text = _command_args(message_str)
 
         try:
             day, body, pos_fn, h0 = _parse_riseset_args(text)
         except ValueError as e:
-            yield event.plain_result(f"参数没看懂：{e}\n格式示例：/risesetday 2026-11-04 SUN")
+            yield event.plain_result(f"参数没看懂：{e}\n格式示例：/当日升落 2026-11-04 SUN")
             return
 
         result = day_riseset(pos_fn, self.lat, self.lon, h0, day)
@@ -103,7 +116,7 @@ class MyPlugin(Star):
     @filter.llm_tool(name="get_riseset_day_tool")
     async def get_riseset_day_tool(self, event: AstrMessageEvent, time: str | None = None, body: str = "SUN"):
         """
-        查询指定日期的天体升落情况。当前支持SUN，MOON，八大行星。
+        查询指定日期的天体升落情况。当前支持SUN、MOON、八大行星、M1~M110、以及常见深空天体，可用中文名/M/NGC 编号查询。
         Args:time(str): 查询时间，格式 YYYY-MM-DD（北京时间）。可省略，省略表示当前日期。
         body(str):查询天体，可省略，省略表示查询太阳（SUN）
         """
@@ -120,10 +133,10 @@ class MyPlugin(Star):
             except ValueError:
                 return f"参数没看懂：日期格式 YYYY-MM-DD，收到的是 {time}"
 
-        body = body.upper()
+        body = normalize_body_name(body)
         try:
             if body not in BODIES:
-                raise ValueError(f"暂时只支持{'、'.join(BODIES)}，收到的是 {body}")
+                raise ValueError(f"暂时只支持日月、行星、M1~M110、以及常见深空天体，可用中文名/M/NGC 编号查询，收到的是 {body}")
             pos_fn, h0 = BODIES[body]
         except ValueError as e:
             return f"参数没看懂：{e}\n格式要求：time:YYYY-MM-DD，body:'SUN'"
@@ -139,23 +152,22 @@ class MyPlugin(Star):
 
         return reply
 
-    @filter.command("risesetbody")
+    @filter.command("天体状态")
     async def risesetbody_cmd(self, event: AstrMessageEvent):
         """
         查询指定的天体在此时的状态，以及下次的升落时间。默认查询太阳，直接回复。
-        当前支持SUN，MOON，八大行星。
+        当前支持SUN、MOON、八大行星、M1~M110、以及常见深空天体，可用中文名/M/NGC 编号查询。
         """
         message_str = event.message_str  # 用户发的纯文本消息字符串
         message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
         logger.info(message_chain)
 
-        idx = message_str.find("/risesetbody")
-        text = message_str[idx + len("/risesetbody") :]
+        text = _command_args(message_str)
 
         try:
             _, body, pos_fn, h0 = _parse_riseset_args(text)
         except ValueError as e:
-            yield event.plain_result(f"参数没看懂：{e}\n格式示例：/risesetbody SUN")
+            yield event.plain_result(f"参数没看懂：{e}\n格式示例：/天体状态 SUN")
             return
         
         t_now = datetime.now()
@@ -174,7 +186,7 @@ class MyPlugin(Star):
     @filter.llm_tool(name="get_riseset_body_tool")
     async def get_riseset_body_tool(self, event: AstrMessageEvent, body: str = "SUN"):
         """
-        查询指定的天体在此时的状态，以及下次的升落时间。当前支持SUN，MOON，八大行星。
+        查询指定的天体在此时的状态，以及下次的升落时间。当前支持SUN、MOON、八大行星、M1~M110、以及常见深空天体，可用中文名/M/NGC 编号查询。
         Args: body(str):查询天体，可省略，省略表示查询太阳（SUN）。
         """
         message_chain = (
@@ -182,10 +194,10 @@ class MyPlugin(Star):
         )  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
         logger.info(message_chain)
 
-        body = body.upper()
+        body = normalize_body_name(body)
         try:
             if body not in BODIES:
-                raise ValueError(f"暂时只支持{'、'.join(BODIES)}，收到的是 {body}")
+                raise ValueError(f"未收录天体 {body}，可使用日月、八大行星或深空天体的中文名、编号和英文别名")
             pos_fn, h0 = BODIES[body]
         except ValueError as e:
             return f"参数没看懂：{e}\n格式要求：body:'SUN'"
@@ -203,7 +215,7 @@ class MyPlugin(Star):
 
         return reply
 
-    @filter.command("wrapperday")
+    @filter.command("当日蒙影")
     async def wrapperday_cmd(self, event: AstrMessageEvent):
         """
         查询指定日期的蒙影情况。从消息文本解析时间（输入日期格式YYYY-MM-DD（北京时间），默认查询当日），直接回复。
@@ -212,8 +224,7 @@ class MyPlugin(Star):
         message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
         logger.info(message_chain)
 
-        idx = message_str.find("/wrapperday")
-        time = message_str[idx + len("/wrapperday") :].strip() or None
+        time = _command_args(message_str) or None
 
         if time is None:
             time_data = datetime.now()
@@ -222,6 +233,7 @@ class MyPlugin(Star):
                 time_data = datetime.strptime(time, "%Y-%m-%d")
             except ValueError:
                 yield event.plain_result( f"参数没看懂：日期格式 YYYY-MM-DD，收到的是 {time}")
+                return
 
         date_local = time_data.strftime("%Y-%m-%d")
         result = wrapper(time_data, self.lat, self.lon)
@@ -293,7 +305,51 @@ class MyPlugin(Star):
         
         reply = await asyncio.to_thread(fetch_llm_astro, self.lat, self.lon)
         return reply
+    
+    @filter.command("深空天体")
+    async def deep_space_object(self, event: AstrMessageEvent):
+        """
+        查询指定深空目标的详细信息，包括星等、视大小、今日的升落时间等。命令后必须接天体名称，接受中文名/M/NGC/IC/英文别名。
+        """
+        message_str = event.message_str  # 用户发的纯文本消息字符串
+        message_chain = (event.get_messages())  # 用户所发的消息的消息链 # from astrbot.api.message_components import *
+        logger.info(message_chain)
 
+        text = message_str.strip()
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            yield event.plain_result("请在命令后接天体名称，例如：/深空天体 M31、/深空天体 玫瑰星云")
+            return
+        name = parts[1].strip()
 
+        reply = query_celestial(name, self.lat, self.lon)
+        yield event.plain_result(reply)
+
+    @filter.llm_tool("get_deep_space_object_tool")
+    async def get_deep_space_object_tool(self, event: AstrMessageEvent, name: str):
+        """
+        查询指定深空目标的详细信息，包括星等、视大小、今日的升落时间等。name为天体名称字符串，接受中文名/M/NGC/IC/英文别名。
+        """
+        reply = query_celestial(name, self.lat, self.lon)
+        return reply
+
+    @filter.command("今夜目标")
+    async def dso_tonight(self, event: AstrMessageEvent):
+        """
+        返回今夜推荐深空目标TOP5，以及对应的天体信息。部分大面积星云的星等仅作参考。
+        """
+        reply = tonight_targets(lat=self.lat, lon=self.lon)
+        yield event.plain_result(reply)
+
+    @filter.llm_tool("get_dso_tonight_tool")
+    async def get_dso_tonight_tool(self, event: AstrMessageEvent, n: int = 5):
+        """
+        返回今夜推荐深空目标TOP n，以及对应的天体信息。部分大面积星云的星等仅作参考。n取值在3~10之间，可以省略，默认为5。
+        """
+        
+        reply = tonight_targets(lat=self.lat, lon=self.lon, top=n)
+        return reply
+    
+    
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
