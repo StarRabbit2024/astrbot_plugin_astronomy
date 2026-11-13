@@ -18,7 +18,7 @@ def _command_args(message_str: str) -> str:
     return parts[1].strip() if len(parts) > 1 else ""
 
 
-@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.7")
+@register("astrbot_plugin_astronomy", "数星星的小白兔", "月相与日月升落查询", "v0.0.8")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
